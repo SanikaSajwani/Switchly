@@ -1,0 +1,114 @@
+#include <EEPROM.h>
+#include <SoftwareSerial.h>
+SoftwareSerial BT(2, 3); // RX is Arduino Pin 2 (connected to HC-05 TX), TX is Arduino Pin 3 (connected to HC-05 RX)
+
+// Define the relay pins (connected to IN1, IN2, IN3, IN4 on the relay module)
+#define Relay1 4
+#define Relay2 5
+#define Relay3 6
+#define Relay4 7
+
+char bt_data;
+// State variables: 1 = ON, 0 = OFF (Initialized to OFF for safety)
+int load1 = 0, load2 = 0, load3 = 0, load4 = 0, power = 0; 
+
+// --- Core Logic: Maps state (1/0) to physical signal (LOW/HIGH) ---
+// This function implements the Active-LOW logic for your relay module.
+void controlRelay(int relayPin, int loadState) {
+  // If loadState is 1 (ON), send LOW to the pin to turn the relay ON.
+  // If loadState is 0 (OFF), send HIGH to the pin to turn the relay OFF.
+  // This is the Active-LOW logic correction: (1 -> LOW) (0 -> HIGH)
+  digitalWrite(relayPin, loadState ? LOW : HIGH);
+}
+
+// Function to apply the current state of all loads and the master power state
+void applyLoadStates() {
+  // If power is 1 ('e' command, Shutdown Mode), all relays are forced OFF (HIGH)
+  if (power == 1) {
+    digitalWrite(Relay1, HIGH);
+    digitalWrite(Relay2, HIGH);
+    digitalWrite(Relay3, HIGH);
+    digitalWrite(Relay4, HIGH);
+  }
+  // If power is 0 ('E' command, Normal Mode), apply individual load controls
+  else {
+    controlRelay(Relay1, load1);
+    controlRelay(Relay2, load2);
+    controlRelay(Relay3, load3);
+    controlRelay(Relay4, load4);
+  }
+}
+
+void setup() {
+  Serial.begin(9600);
+  BT.begin(9600);
+
+  // Set all relay pins as OUTPUT
+  pinMode(Relay1, OUTPUT);
+  pinMode(Relay2, OUTPUT);
+  pinMode(Relay3, OUTPUT);
+  pinMode(Relay4, OUTPUT);
+
+  // --- EEPROM Initialization ---
+  // Read previous states from EEPROM. This brings the loads back to their last state after power cycle.
+  load1 = EEPROM.read(1) > 0 ? 1 : 0;
+  load2 = EEPROM.read(2) > 0 ? 1 : 0;
+  load3 = EEPROM.read(3) > 0 ? 1 : 0;
+  load4 = EEPROM.read(4) > 0 ? 1 : 0;
+  power = EEPROM.read(5) > 0 ? 1 : 0; // Master Power state
+
+  // Apply the EEPROM states immediately at startup
+  applyLoadStates();
+
+  // No debugging output left, clean startup!
+  delay(300);
+}
+
+void loop() {
+
+  // Check for incoming Bluetooth data
+  if (BT.available()) {
+    bt_data = BT.read();
+
+    // --- Bluetooth Command Handling for Generic App Buttons ---
+    switch (bt_data) {
+      
+      // Load 1 Control
+      case 'a': load1 = 1; EEPROM.write(1, 1); break; // 'a' = ON
+      case 'A': load1 = 0; EEPROM.write(1, 0); break; // 'A' = OFF
+
+      // Load 2 Control
+      case 'b': load2 = 1; EEPROM.write(2, 1); break; // 'b' = ON
+      case 'B': load2 = 0; EEPROM.write(2, 0); break; // 'B' = OFF
+
+      // Load 3 Control
+      case 'c': load3 = 1; EEPROM.write(3, 1); break; // 'c' = ON
+      case 'C': load3 = 0; EEPROM.write(3, 0); break; // 'C' = OFF
+
+      // Load 4 Control
+      case 'd': load4 = 1; EEPROM.write(4, 1); break; // 'd' = ON
+      case 'D': load4 = 0; EEPROM.write(4, 0); break; // 'D' = OFF
+
+      // Global Power/Shutdown Control
+      case 'e': power = 1; EEPROM.write(5, 1); break; // 'e' = SHUTDOWN MODE (Forces All OFF)
+      case 'E': power = 0; EEPROM.write(5, 0); break; // 'E' = NORMAL MODE (Enables individual load control)
+    }
+  }
+
+  // Control all relays based on the stored state variables
+  applyLoadStates();
+
+  // Send back the current state to the Bluetooth app (good practice for UI feedback)
+  BT.print(power);
+  BT.print(",");
+  BT.print(load1);
+  BT.print(",");
+  BT.print(load2);
+  BT.print(",");
+  BT.print(load3);
+  BT.print(",");
+  BT.print(load4);
+  BT.println(";");
+
+  delay(200);
+}
